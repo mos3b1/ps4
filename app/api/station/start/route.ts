@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { GAMES } from "@/lib/pricing";
-import { getStation, startStation, resolveGame, switchGame } from "@/lib/stationStore";
+import { startStation, resolveGame, switchGame } from "@/lib/stationStore";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -17,14 +16,35 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { stationId, gameId, customerName, mode, playerCount, customPricePerMatch } = body;
 
-    if (typeof stationId !== "number" || !gameId) {
+    if (typeof stationId !== "number" || stationId < 1 || stationId > 12 || !gameId) {
       return NextResponse.json(
-        { error: "Missing stationId or gameId" },
+        { error: "Missing stationId or gameId. stationId must be a number between 1 and 12" },
         { status: 400, headers: corsHeaders }
       );
     }
 
-    const game = GAMES.find((g) => g.id === gameId); // Assuming resolveGame is GAMES.find for now, as it's not provided
+    if (playerCount !== undefined && playerCount !== 2 && playerCount !== 4) {
+      return NextResponse.json(
+        { error: "playerCount must be 2 or 4" },
+        { status: 400, headers: corsHeaders }
+      );
+    }
+
+    if (customPricePerMatch !== undefined && customPricePerMatch !== null && typeof customPricePerMatch !== "number") {
+      return NextResponse.json(
+        { error: "customPricePerMatch must be a number or null" },
+        { status: 400, headers: corsHeaders }
+      );
+    }
+
+    if (mode !== undefined && mode !== "switch") {
+      return NextResponse.json(
+        { error: "mode must be 'switch' if provided" },
+        { status: 400, headers: corsHeaders }
+      );
+    }
+
+    const game = resolveGame(gameId);
     if (!game) {
       return NextResponse.json(
         { error: "Game not found" },

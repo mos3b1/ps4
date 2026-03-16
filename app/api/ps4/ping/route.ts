@@ -17,9 +17,16 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { stationId, event, titleId, titleName } = body;
 
-    if (typeof stationId !== "number" || !event) {
+    if (typeof stationId !== "number" || stationId < 1 || stationId > 12 || !event) {
       return NextResponse.json(
-        { error: "Missing stationId or event" },
+        { error: "Missing stationId or event. stationId must be a number between 1 and 12" },
+        { status: 400, headers: corsHeaders }
+      );
+    }
+
+    if (event !== "start" && event !== "stop") {
+      return NextResponse.json(
+        { error: "event must be 'start' or 'stop'" },
         { status: 400, headers: corsHeaders }
       );
     }
@@ -75,7 +82,7 @@ export async function POST(request: Request) {
       if (existingStation?.running) {
         if ((existingStation.segments ?? []).length > 0 || existingStation.gameId !== gameId) {
           // Already has segments running — switch game instead
-          const closedSegment = switchGame(stationId, game);
+          const closedSegment = switchGame(stationId, game, undefined, undefined);
           return NextResponse.json(
             { received: true, stationId, event, switched: true, closedSegment },
             { headers: corsHeaders }
@@ -89,12 +96,12 @@ export async function POST(request: Request) {
       }
 
       // Fresh start with PS4 source (game found)
-      startStation(stationId, game, "", "ps4");
+      startStation(stationId, game, "", "ps4", 2);
     } else if (event === "stop") {
       // Use stopStation to save session to history (previously resetStation was used — bug)
       const existingStation = getStation(stationId);
       if (existingStation?.running) {
-        stopStation(stationId);
+        stopStation(stationId, undefined);
       }
     }
 

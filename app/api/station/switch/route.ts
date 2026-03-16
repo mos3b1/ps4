@@ -17,9 +17,9 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { stationId, gameId } = body;
 
-    if (typeof stationId !== "number" || !gameId) {
+    if (typeof stationId !== "number" || stationId < 1 || stationId > 12 || !gameId) {
       return NextResponse.json(
-        { error: "Missing stationId or gameId" },
+        { error: "Missing stationId or gameId. stationId must be a number between 1 and 12" },
         { status: 400, headers: corsHeaders }
       );
     }

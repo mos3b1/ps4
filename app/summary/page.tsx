@@ -28,10 +28,6 @@ export default function Summary() {
     return new Date().toISOString().split("T")[0];
   });
 
-  useEffect(() => {
-    fetchHistory();
-  }, []);
-
   const fetchHistory = async () => {
     try {
       const response = await fetch("/api/history");
@@ -43,6 +39,10 @@ export default function Summary() {
       console.error("Failed to fetch history:", error);
     }
   };
+
+  useEffect(() => {
+    fetchHistory();
+  }, []);
 
   const getDateLabel = (offset: number): string => {
     const date = new Date();

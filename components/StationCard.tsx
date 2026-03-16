@@ -2,11 +2,10 @@
 
 import { useState } from "react";
 import { Station } from "@/lib/types";
-import { calcBill, calcMatches, calcCycleMinutes, Game } from "@/lib/pricing";
+import { calcBill, calcMatches, calcCycleMinutes } from "@/lib/pricing";
 import { useTimer } from "@/context/TimerContext";
 import LiveTimer from "./LiveTimer";
-import BillDisplay from "./BillDisplay";
-import MatchInfo from "./MatchInfo";
+
 import SetupModal from "./SetupModal";
 
 interface StationCardProps {
@@ -47,7 +46,7 @@ export default function StationCard({ station, onStartClick }: StationCardProps)
   };
 
   // Calculate current segment bill and matches
-  const currentBill = game ? calcBill(game, station.elapsed, settings) : 0;
+  const currentBill = game ? calcBill(game, station.elapsed, settings, station.playerCount, station.customPricePerMatch ?? null) : 0;
   const currentMatches = game ? calcMatches(game, station.elapsed, settings) : 0;
   const cycleMinutes = game && game.mode === "time-match" ? calcCycleMinutes(game, settings) : 0;
 
@@ -398,7 +397,7 @@ export default function StationCard({ station, onStartClick }: StationCardProps)
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "14px", color: "#ddd" }}>
                   <span>× {currentMatches} {currentMatches === 1 ? "match" : "matches"} =</span>
                   <span style={{ fontWeight: 800, color: "#f0c040", fontSize: "16px" }}>
-                    {currentMatches * (station.customPricePerMatch ?? (game.id === "pes" ? settings.pes.pricePerMatch : game.id === "fifa" ? settings.fifa.pricePerMatch : game.price))} DZD
+                    {currentBill} DZD
                   </span>
                 </div>
               </div>

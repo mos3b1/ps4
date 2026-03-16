@@ -463,8 +463,11 @@ export function stopStation(
 }
 
 export function getElapsed(station: StationState): { current: number; total: number } {
+  // Guard against legacy state with undefined segments
+  if (!station.segments) station.segments = [];
+  
   if (!station.running || !station.currentSegmentStart) {
-    return { current: 0, total: (station.segments || []).reduce((sum, seg) => sum + seg.elapsed, 0) };
+    return { current: 0, total: station.segments.reduce((sum, seg) => sum + seg.elapsed, 0) };
   }
   
   const now = Date.now();
@@ -476,7 +479,7 @@ export function getElapsed(station: StationState): { current: number; total: num
     currentElapsed = Math.floor((now - station.currentSegmentStart - station.totalPausedSeconds) / 1000);
   }
   
-  const totalElapsed = (station.segments || []).reduce((sum, seg) => sum + seg.elapsed, 0) + currentElapsed;
+  const totalElapsed = station.segments.reduce((sum, seg) => sum + seg.elapsed, 0) + currentElapsed;
   
   return { current: Math.max(0, currentElapsed), total: Math.max(0, totalElapsed) };
 }
@@ -495,7 +498,7 @@ export function stationStateToStation(id: number, state: StationState): Station 
   }
   
   // Calculate total bill from segments + current
-  const segmentsBill = (state.segments || []).reduce((sum, seg) => sum + seg.bill, 0);
+  const segmentsBill = state.segments.reduce((sum, seg) => sum + seg.bill, 0);
   const totalBill = segmentsBill + currentBill;
   
   return {

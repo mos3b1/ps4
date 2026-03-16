@@ -6,20 +6,20 @@ import StationCard from "@/components/StationCard";
 import SetupModal from "@/components/SetupModal";
 
 export default function Dashboard() {
-  const { stations, stationsCount, setStationsCount, startStation, toast, setStationsCount: updateCount } = useTimer();
+  const { stations, stationsCount, setStationsCount, startStation } = useTimer();
   const [modalStationId, setModalStationId] = useState<number | null>(null);
 
   const handleIncrement = () => {
     if (stationsCount < 12) {
       const newCount = stationsCount + 1;
-      updateCount(newCount);
+      setStationsCount(newCount);
     }
   };
 
   const handleDecrement = () => {
     if (stationsCount > 1) {
       const newCount = stationsCount - 1;
-      updateCount(newCount);
+      setStationsCount(newCount);
     }
   };
 

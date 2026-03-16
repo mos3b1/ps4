@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getStation, setStation, saveCustomGame, startStation, CustomGame } from "@/lib/stationStore";
+import { Game, GameMode } from "@/lib/pricing";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -19,6 +20,22 @@ export async function POST(request: Request) {
     if (typeof stationId !== "number" || !mode || typeof price !== "number") {
       return NextResponse.json(
         { error: "Missing required fields" },
+        { status: 400, headers: corsHeaders }
+      );
+    }
+
+    // Validate mode
+    if (mode !== "time-match" && mode !== "hour") {
+      return NextResponse.json(
+        { error: "Invalid mode. Must be 'time-match' or 'hour'" },
+        { status: 400, headers: corsHeaders }
+      );
+    }
+
+    // Validate matchCycleMinutes for time-match mode
+    if (mode === "time-match" && (typeof matchCycleMinutes !== "number" || matchCycleMinutes <= 0)) {
+      return NextResponse.json(
+        { error: "matchCycleMinutes must be a positive number for time-match mode" },
         { status: 400, headers: corsHeaders }
       );
     }
@@ -48,11 +65,11 @@ export async function POST(request: Request) {
     saveCustomGame(customGame);
 
     // Create the Game object for pricing logic
-    const resolvedGame = {
+    const resolvedGame: Game = {
       id: titleId,
       label: titleName,
       emoji: "🎮", // default emoji for custom games
-      mode,
+      mode: mode as GameMode,
       price,
       matchCycleMinutes: mode === "time-match" ? matchCycleMinutes : undefined,
     };
@@ -63,7 +80,7 @@ export async function POST(request: Request) {
 
     // Call startStation which handles either fresh start or closing old segment
     // It will set the gameId and start tracking billing properly.
-    startStation(stationId, resolvedGame as any, existing.customerName, existing.source);
+    startStation(stationId, resolvedGame, existing.customerName, existing.source);
 
     return NextResponse.json(
       { success: true },

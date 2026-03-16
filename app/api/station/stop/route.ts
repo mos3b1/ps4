@@ -16,9 +16,16 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { stationId, customPricePerMatch } = body;
 
-    if (typeof stationId !== "number") {
+    if (typeof stationId !== "number" || stationId < 1 || stationId > 12) {
       return NextResponse.json(
-        { error: "Missing stationId" },
+        { error: "Invalid stationId. Must be a number between 1 and 12" },
+        { status: 400, headers: corsHeaders }
+      );
+    }
+
+    if (customPricePerMatch !== undefined && customPricePerMatch !== null && typeof customPricePerMatch !== "number") {
+      return NextResponse.json(
+        { error: "customPricePerMatch must be a number or null" },
         { status: 400, headers: corsHeaders }
       );
     }
