@@ -1,26 +1,133 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg-main: #080810;
+  --bg-card: #0d0d18;
+  --bg-nav: #0a0a14;
+  --color-gold: #f0c040;
+  --color-live: #44ff88;
+  --color-stop: #ff4444;
+  --color-border: #1a1a2e;
+  --color-muted: #555555;
+  --color-text: #e0e0e0;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+* { box-sizing: border-box; margin: 0; padding: 0; }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  font-size: 16px;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--bg-main);
+  color: var(--color-text);
+  font-family: var(--font-rajdhani), sans-serif;
+  min-height: 100vh;
+}
+
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: #0a0a14; }
+::-webkit-scrollbar-thumb { background: #1a1a2e; border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: #2a2a3e; }
+
+/* ── Animations ─────────────────────────────────────────── */
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+@keyframes gold-glow {
+  0%, 100% { box-shadow: 0 0 10px #f0c04033; }
+  50% { box-shadow: 0 0 25px #f0c04088; }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes top-border-glow {
+  0%, 100% { border-top-color: #f0c04066; }
+  50%       { border-top-color: #f0c040cc; }
+}
+
+.animate-pulse-dot { animation: pulse-dot 1.2s infinite; }
+.animate-gold-glow { animation: gold-glow 2s infinite; }
+.animate-fade-in   { animation: fade-in 0.3s ease; }
+.animate-top-border-glow { animation: top-border-glow 2s infinite; }
+
+/* ── Font Helpers ────────────────────────────────────────── */
+
+.font-orbitron {
+  font-family: var(--font-orbitron), sans-serif;
+}
+
+/* ── Btn Base ────────────────────────────────────────────── */
+
+.btn-gold {
+  display: block;
+  width: 100%;
+  padding: 12px 0;
+  background: linear-gradient(135deg, #f0c040, #c08000);
+  color: #000;
+  font-family: var(--font-orbitron), sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  text-transform: uppercase;
+}
+
+.btn-gold:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px #f0c04044;
+}
+
+.btn-gold:active {
+  transform: translateY(0);
+}
+
+.btn-red {
+  display: block;
+  width: 100%;
+  padding: 12px 0;
+  background: linear-gradient(135deg, #ff4444, #aa1111);
+  color: #fff;
+  font-family: var(--font-orbitron), sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  text-transform: uppercase;
+}
+
+.btn-red:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px #ff444444;
+}
+
+.btn-red:active {
+  transform: translateY(0);
+}
+
+/* ── Card ────────────────────────────────────────────────── */
+
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+}
+
+/* ── Focus ring ──────────────────────────────────────────── */
+
+input:focus {
+  outline: none;
+  border-color: #f0c04055 !important;
 }
