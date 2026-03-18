@@ -1,6 +1,7 @@
 import { readFileSync } from "fs";
 
-// Read DATABASE_URL from .env.local file directly
+// Vercel production build config - uses .mjs to avoid importing drizzle-kit types
+// This file is only used for drizzle-kit CLI commands, not runtime
 let databaseUrl = process.env.DATABASE_URL;
 
 if (!databaseUrl) {
