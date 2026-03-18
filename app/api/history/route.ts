@@ -13,14 +13,17 @@ export async function OPTIONS() {
 
 export async function GET() {
   try {
-    const history = getHistory();
+    // Do the work
+    const history = await getHistory();
     return NextResponse.json(
       { history },
       { headers: corsHeaders }
     );
+
   } catch (error) {
+    console.error("[API ERROR] /api/history GET:", error);
     return NextResponse.json(
-      { error: "Failed to get history" },
+      { error: "Internal server error", details: String(error) },
       { status: 500, headers: corsHeaders }
     );
   }
@@ -29,25 +32,30 @@ export async function GET() {
 export async function DELETE(request: Request) {
   try {
     const body = await request.json();
+    
+    // Validate body first
     const { date } = body;
-
+    
     if (!date) {
       return NextResponse.json(
-        { error: "Missing date" },
+        { error: "date required" },
         { status: 400, headers: corsHeaders }
       );
     }
 
-    clearDay(date);
+    // Do the work
+    await clearDay(date);
 
     return NextResponse.json(
       { success: true },
       { headers: corsHeaders }
     );
+
   } catch (error) {
+    console.error("[API ERROR] /api/history DELETE:", error);
     return NextResponse.json(
-      { error: "Invalid request" },
-      { status: 400, headers: corsHeaders }
+      { error: "Internal server error", details: String(error) },
+      { status: 500, headers: corsHeaders }
     );
   }
 }

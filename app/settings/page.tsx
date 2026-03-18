@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useTimer } from "@/context/TimerContext";
-import { GameSettings } from "@/lib/stationStore";
+import { GameSettings } from "@/lib/pricing";
 
 export default function Settings() {
   const { settings, updateSettings, toast } = useTimer();
@@ -39,11 +39,6 @@ export default function Settings() {
 
   const handleSave = async () => {
     await updateSettings(localSettings);
-  };
-
-  const getCycleMinutes = (game: "pes" | "fifa") => {
-    const settings = localSettings[game] as { matchDurationMin: number; breakDurationMin: number };
-    return settings.matchDurationMin + settings.breakDurationMin;
   };
 
   const calculateExample = (game: "pes" | "fifa") => {

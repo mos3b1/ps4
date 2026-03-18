@@ -1,168 +1,388 @@
-import { GAMES, Game, calcBill, calcMatches } from "./pricing";
-import { Station, Session, HistoryStore, GameSegment } from "./types";
+import { db, stations, sessions, settings, gameRegistry } from "./db";
+import { eq } from "drizzle-orm";
+import { 
+  GAMES, Game, GameSettings, DEFAULT_SETTINGS, 
+  calcBill, calcMatches, calcCycleMinutes, nowSeconds 
+} from "./pricing";
+import { Station, Session, GameSegment } from "./types";
 
-type StationState = {
-  running: boolean;
-  paused: boolean;
-  pausedAt: number | null;
-  totalPausedSeconds: number;
-  gameId: string | null;
-  sessionStartEpoch: number | null;
-  currentSegmentStart: number | null;
-  customerName: string;
-  source: "manual" | "ps4";
-  segments: GameSegment[];
-  unknownGame: {
-    titleId: string;
-    titleName: string;
-  } | null;
-  playerCount?: 2 | 4;
-};
+export type { GameSettings };
+export { DEFAULT_SETTINGS };
 
 export interface CustomGame {
   titleId: string;
-  titleName: string;        // real name from PS4
-  gameId: string;           // "pes" | "fifa" | "gta" | "unknown"
+  titleName: string;
+  gameId: string;
   mode: "time-match" | "hour";
   price: number;
   matchCycleMinutes?: number;
-  addedAt: string;          // date first seen
-  isTemp?: boolean;         // true if user didn't check "Remember this game"
+  addedAt: string;
+  isTemp?: boolean;
 }
 
-export interface GameSettings {
-  pes: {
-    pricePerMatch: number;
-    matchDurationMin: number;
-    breakDurationMin: number;
-  };
-  fifa: {
-    pricePerMatch: number;
-    matchDurationMin: number;
-    breakDurationMin: number;
-  };
-  gta: {
-    pricePerHour: number;
-  };
-  cod: {
-    pricePerHour: number;
-  };
-  mk: {
-    pricePerHour: number;
-  };
-  other: {
-    pricePerHour: number;
-  };
-}
-
-export const DEFAULT_SETTINGS: GameSettings = {
-  pes: { pricePerMatch: 50, matchDurationMin: 11, breakDurationMin: 4 },
-  fifa: { pricePerMatch: 50, matchDurationMin: 12, breakDurationMin: 4 },
-  gta: { pricePerHour: 100 },
-  cod: { pricePerHour: 80 },
-  mk: { pricePerHour: 80 },
-  other: { pricePerHour: 60 },
+type StationState = {
+  id: number;
+  running: boolean;
+  paused: boolean;
+  pausedAt: number | null;      // milliseconds since epoch
+  totalPausedSeconds: number; // seconds
+  gameId: string | null;
+  sessionStartEpoch: number | null; // milliseconds since epoch
+  currentSegmentStart: number | null; // milliseconds since epoch
+  customerName: string;
+  source: "manual" | "ps4";
+  segments: GameSegment[];
+  unknownGame: { titleId: string; titleName: string } | null;
+  playerCount?: 2 | 4;
+  customPricePerMatch?: number | null;
+  currentGameJson?: any;
 };
 
-declare global {
-  var __stationStore: Map<number, StationState> | undefined;
-  var __historyStore: HistoryStore | undefined;
-  var __settingsStore: GameSettings | undefined;
-  var __gameRegistry: Map<string, CustomGame> | undefined;
+function rowToStationState(row: typeof stations.$inferSelect): StationState {
+  return {
+    id: row.id,
+    running: row.running ?? false,
+    paused: row.paused ?? false,
+    pausedAt: row.pausedAt !== null ? Number(row.pausedAt) : null,
+    totalPausedSeconds: row.totalPausedSeconds ?? 0,
+    gameId: row.currentGameId ?? null,
+    sessionStartEpoch: row.sessionStartEpoch !== null ? Number(row.sessionStartEpoch) : null,
+    currentSegmentStart: row.segmentStartEpoch !== null ? Number(row.segmentStartEpoch) : null,
+    customerName: row.customerName ?? "",
+    source: (row.source as "manual" | "ps4") ?? "manual",
+    segments: (row.segments as GameSegment[]) ?? [],
+    unknownGame: row.unknownGame as { titleId: string; titleName: string } | null,
+    playerCount: row.playerCount as 2 | 4 | undefined,
+    customPricePerMatch: row.customPricePerMatch ?? null,
+    currentGameJson: row.currentGameJson,
+  };
 }
 
-function getStationStore(): Map<number, StationState> {
-  if (!globalThis.__stationStore) {
-    globalThis.__stationStore = new Map();
-    for (let i = 1; i <= 4; i++) {
-      globalThis.__stationStore.set(i, {
-        running: false,
-        paused: false,
-        pausedAt: null,
-        totalPausedSeconds: 0,
-        gameId: null,
-        sessionStartEpoch: null,
-        currentSegmentStart: null,
-        customerName: "",
-        source: "manual",
-        segments: [],
-        unknownGame: null,
-      });
-    }
-  }
-  return globalThis.__stationStore;
-}
-
-function getHistoryStore(): HistoryStore {
-  if (!globalThis.__historyStore) {
-    globalThis.__historyStore = {};
-  }
-  return globalThis.__historyStore;
-}
-
-function getSettingsStore(): GameSettings {
-  if (!globalThis.__settingsStore) {
-    globalThis.__settingsStore = { ...DEFAULT_SETTINGS };
-  }
-  return globalThis.__settingsStore;
-}
-
-export function getSettings(): GameSettings {
-  return getSettingsStore();
-}
-
-export function updateSettings(partial: Partial<GameSettings>): GameSettings {
-  const current = getSettingsStore();
-  globalThis.__settingsStore = { ...current, ...partial };
-  return globalThis.__settingsStore;
-}
-
-export function getStation(id: number): StationState | undefined {
-  return getStationStore().get(id);
-}
-
-export function setStation(id: number, state: StationState): void {
-  getStationStore().set(id, state);
-}
-
-export function getAllStations(): StationState[] {
-  const store = getStationStore();
-  const stations: StationState[] = [];
-  for (let i = 1; i <= store.size; i++) {
-    const station = store.get(i);
-    if (station) stations.push(station);
-  }
-  return stations;
-}
-
-export function resetStation(id: number): void {
-  const store = getStationStore();
-  store.set(id, {
+function makeEmptyStation(id: number): typeof stations.$inferInsert {
+  return {
+    id,
     running: false,
     paused: false,
     pausedAt: null,
     totalPausedSeconds: 0,
-    gameId: null,
+    currentGameId: null,
+    currentGameJson: null,
     sessionStartEpoch: null,
-    currentSegmentStart: null,
+    segmentStartEpoch: null,
     customerName: "",
     source: "manual",
     segments: [],
+    totalBill: 0,
     unknownGame: null,
-    playerCount: undefined,
-  });
+    customPricePerMatch: null,
+    playerCount: null,
+  };
 }
 
-export function resolveGame(gameId: string | null): Game | null {
+// ─────────────────────────────────────────────────────────────
+// STATIONS
+// ─────────────────────────────────────────────────────────────
+
+export async function getAllStations(): Promise<StationState[]> {
+  try {
+    let rows = await db.select().from(stations).orderBy(stations.id);
+    if (rows.length === 0) {
+      // Seed 4 empty stations on first run
+      await db.insert(stations).values(
+        Array.from({ length: 4 }, (_, i) => makeEmptyStation(i + 1))
+      );
+      rows = await db.select().from(stations).orderBy(stations.id);
+    }
+    return rows.map(rowToStationState);
+  } catch (error) {
+    console.error("[DB ERROR] getAllStations:", error);
+    throw error;
+  }
+}
+
+export async function getStation(id: number): Promise<StationState | null> {
+  try {
+    const rows = await db.select().from(stations).where(eq(stations.id, id));
+    if (rows.length === 0) {
+      // Create station if doesn't exist
+      await db.insert(stations).values(makeEmptyStation(id));
+      const newRows = await db.select().from(stations).where(eq(stations.id, id));
+      return newRows.length > 0 ? rowToStationState(newRows[0]) : null;
+    }
+    return rowToStationState(rows[0]);
+  } catch (error) {
+    console.error("[DB ERROR] getStation:", error);
+    throw error;
+  }
+}
+
+export async function setStation(id: number, state: Partial<StationState>): Promise<void> {
+  try {
+    const update: Partial<typeof stations.$inferInsert> = {};
+    if (state.running !== undefined) update.running = state.running;
+    if (state.paused !== undefined) update.paused = state.paused;
+    if (state.pausedAt !== undefined) update.pausedAt = state.pausedAt;
+    if (state.totalPausedSeconds !== undefined) update.totalPausedSeconds = state.totalPausedSeconds;
+    if (state.gameId !== undefined) update.currentGameId = state.gameId;
+    if (state.sessionStartEpoch !== undefined) update.sessionStartEpoch = state.sessionStartEpoch;
+    if (state.currentSegmentStart !== undefined) update.segmentStartEpoch = state.currentSegmentStart;
+    if (state.customerName !== undefined) update.customerName = state.customerName;
+    if (state.source !== undefined) update.source = state.source;
+    if (state.segments !== undefined) update.segments = state.segments;
+    if (state.unknownGame !== undefined) update.unknownGame = state.unknownGame;
+    if (state.playerCount !== undefined) update.playerCount = state.playerCount;
+    if (state.customPricePerMatch !== undefined) update.customPricePerMatch = state.customPricePerMatch;
+    if (state.currentGameJson !== undefined) update.currentGameJson = state.currentGameJson;
+    
+    update.updatedAt = new Date();
+    
+    await db.update(stations).set(update).where(eq(stations.id, id));
+  } catch (error) {
+    console.error("[DB ERROR] setStation:", error);
+    throw error;
+  }
+}
+
+export async function resetStation(id: number): Promise<void> {
+  try {
+    await db.update(stations)
+      .set(makeEmptyStation(id))
+      .where(eq(stations.id, id));
+  } catch (error) {
+    console.error("[DB ERROR] resetStation:", error);
+    throw error;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// SETTINGS
+// ─────────────────────────────────────────────────────────────
+
+export async function getSettings(): Promise<GameSettings> {
+  try {
+    const rows = await db.select().from(settings);
+    if (rows.length === 0) {
+      // Seed default settings
+      const defaults = [
+        { gameId: "pes", pricePerMatch: 50, matchDurationMin: 11, breakDurationMin: 4 },
+        { gameId: "fifa", pricePerMatch: 50, matchDurationMin: 12, breakDurationMin: 4 },
+        { gameId: "gta", pricePerHour: 100 },
+        { gameId: "cod", pricePerHour: 80 },
+        { gameId: "mk", pricePerHour: 80 },
+        { gameId: "other", pricePerHour: 60 },
+      ];
+      await db.insert(settings).values(defaults);
+      return DEFAULT_SETTINGS;
+    }
+    
+    const result: GameSettings = { ...DEFAULT_SETTINGS };
+    for (const row of rows) {
+      if (row.gameId === "pes" || row.gameId === "fifa") {
+        result[row.gameId] = {
+          pricePerMatch: row.pricePerMatch ?? result[row.gameId].pricePerMatch,
+          matchDurationMin: row.matchDurationMin ?? result[row.gameId].matchDurationMin,
+          breakDurationMin: row.breakDurationMin ?? result[row.gameId].breakDurationMin,
+        };
+      } else {
+        result[row.gameId as "gta" | "cod" | "mk" | "other"] = {
+          pricePerHour: row.pricePerHour ?? result[row.gameId as "gta" | "cod" | "mk" | "other"].pricePerHour,
+        };
+      }
+    }
+    return result;
+  } catch (error) {
+    console.error("[DB ERROR] getSettings:", error);
+    throw error;
+  }
+}
+
+export async function updateSettings(partial: Partial<GameSettings>): Promise<GameSettings> {
+  try {
+    for (const [gameId, vals] of Object.entries(partial)) {
+      const existing = await db.select().from(settings).where(eq(settings.gameId, gameId));
+      if (existing.length > 0) {
+        await db.update(settings)
+          .set({ ...vals, updatedAt: new Date() })
+          .where(eq(settings.gameId, gameId));
+      } else {
+        await db.insert(settings).values({ gameId, ...vals });
+      }
+    }
+    return getSettings();
+  } catch (error) {
+    console.error("[DB ERROR] updateSettings:", error);
+    throw error;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// SESSIONS / HISTORY
+// ─────────────────────────────────────────────────────────────
+
+export async function getHistory(): Promise<Record<string, Session[]>> {
+  try {
+    const rows = await db.select().from(sessions).orderBy(sessions.createdAt);
+    const grouped: Record<string, Session[]> = {};
+    for (const row of rows) {
+      const session: Session = {
+        date: row.date,
+        time: row.time,
+        customerName: row.customerName ?? "",
+        source: (row.source as "manual" | "ps4") ?? "manual",
+        totalElapsed: row.elapsed ?? 0,
+        totalBill: row.totalBill ?? 0,
+        segments: (row.segments as GameSegment[]) ?? [],
+        playerCount: row.playerCount as 2 | 4 | undefined,
+      };
+      if (!grouped[row.date]) grouped[row.date] = [];
+      grouped[row.date].push(session);
+    }
+    return grouped;
+  } catch (error) {
+    console.error("[DB ERROR] getHistory:", error);
+    throw error;
+  }
+}
+
+export async function saveSession(session: Session): Promise<void> {
+  try {
+    await db.insert(sessions).values({
+      date: session.date,
+      time: session.time,
+      stationId: null,
+      customerName: session.customerName,
+      gameLabel: session.segments[0]?.gameLabel ?? "",
+      gameEmoji: session.segments[0]?.gameEmoji ?? "🎮",
+      source: session.source,
+      elapsed: session.totalElapsed ?? 0,
+      totalBill: session.totalBill ?? 0,
+      segments: session.segments ?? [],
+      playerCount: session.playerCount ?? null,
+    });
+  } catch (error) {
+    console.error("[DB ERROR] saveSession:", error);
+    throw error;
+  }
+}
+
+export async function clearDay(date: string): Promise<void> {
+  try {
+    await db.delete(sessions).where(eq(sessions.date, date));
+  } catch (error) {
+    console.error("[DB ERROR] clearDay:", error);
+    throw error;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// GAME REGISTRY
+// ─────────────────────────────────────────────────────────────
+
+export async function getGameRegistry(): Promise<Record<string, CustomGame>> {
+  try {
+    const rows = await db.select().from(gameRegistry);
+    const result: Record<string, CustomGame> = {};
+    for (const row of rows) {
+      result[row.titleId] = {
+        titleId: row.titleId,
+        titleName: row.titleName,
+        gameId: row.gameId,
+        mode: row.mode as "time-match" | "hour",
+        price: row.price,
+        matchCycleMinutes: row.matchCycleMinutes ?? undefined,
+        addedAt: row.addedAt ?? "",
+        isTemp: row.isTemp ?? false,
+      };
+    }
+    return result;
+  } catch (error) {
+    console.error("[DB ERROR] getGameRegistry:", error);
+    throw error;
+  }
+}
+
+export async function getGameByTitleId(titleId: string): Promise<CustomGame | null> {
+  try {
+    const rows = await db.select().from(gameRegistry).where(eq(gameRegistry.titleId, titleId));
+    if (rows.length === 0) return null;
+    const row = rows[0];
+    return {
+      titleId: row.titleId,
+      titleName: row.titleName,
+      gameId: row.gameId,
+      mode: row.mode as "time-match" | "hour",
+      price: row.price,
+      matchCycleMinutes: row.matchCycleMinutes ?? undefined,
+      addedAt: row.addedAt ?? "",
+      isTemp: row.isTemp ?? false,
+    };
+  } catch (error) {
+    console.error("[DB ERROR] getGameByTitleId:", error);
+    throw error;
+  }
+}
+
+export async function saveCustomGame(game: CustomGame): Promise<void> {
+  try {
+    await db.insert(gameRegistry)
+      .values({
+        titleId: game.titleId,
+        titleName: game.titleName,
+        gameId: game.gameId,
+        mode: game.mode,
+        price: game.price,
+        matchCycleMinutes: game.matchCycleMinutes,
+        addedAt: game.addedAt,
+        isTemp: game.isTemp ?? false,
+      })
+      .onConflictDoUpdate({
+        target: gameRegistry.titleId,
+        set: {
+          titleName: game.titleName,
+          gameId: game.gameId,
+          mode: game.mode,
+          price: game.price,
+          matchCycleMinutes: game.matchCycleMinutes,
+          isTemp: game.isTemp ?? false,
+        }
+      });
+  } catch (error) {
+    console.error("[DB ERROR] saveCustomGame:", error);
+    throw error;
+  }
+}
+
+export async function getAllGames(): Promise<CustomGame[]> {
+  try {
+    const registry = await getGameRegistry();
+    return Object.values(registry).filter(g => !g.isTemp);
+  } catch (error) {
+    console.error("[DB ERROR] getAllGames:", error);
+    throw error;
+  }
+}
+
+export async function deleteGame(titleId: string): Promise<void> {
+  try {
+    await db.delete(gameRegistry).where(eq(gameRegistry.titleId, titleId));
+  } catch (error) {
+    console.error("[DB ERROR] deleteGame:", error);
+    throw error;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// STATION ACTIONS
+// ─────────────────────────────────────────────────────────────
+
+export function resolveGame(gameId: string | null, customRegistry?: Record<string, CustomGame>): Game | null {
   if (!gameId) return null;
   
-  // 1. Check built-in games
   const builtin = GAMES.find(g => g.id === gameId);
   if (builtin) return builtin;
   
-  // 2. Check custom registry
-  const custom = getGameByTitleId(gameId);
-  if (custom) {
+  if (customRegistry && customRegistry[gameId]) {
+    const custom = customRegistry[gameId];
     return {
       id: custom.titleId,
       label: custom.titleName,
@@ -176,127 +396,79 @@ export function resolveGame(gameId: string | null): Game | null {
   return null;
 }
 
-export function getStationsCount(): number {
-  return getStationStore().size;
-}
-
-export function setStationsCount(count: number): void {
-  const store = getStationStore();
-  const currentSize = store.size;
-  
-  if (count > currentSize) {
-    for (let i = currentSize + 1; i <= count; i++) {
-      store.set(i, {
-        running: false,
-        paused: false,
-        pausedAt: null,
-        totalPausedSeconds: 0,
-        gameId: null,
-        sessionStartEpoch: null,
-        currentSegmentStart: null,
-        customerName: "",
-        source: "manual",
-        segments: [],
-        unknownGame: null,
-        playerCount: undefined,
-      });
-    }
-  } else if (count < currentSize) {
-    for (let i = currentSize; i > count; i--) {
-      const station = store.get(i);
-      if (station && !station.running) {
-        store.delete(i);
-      }
-    }
-  }
-}
-
-export function getHistory(): HistoryStore {
-  return getHistoryStore();
-}
-
-export function saveSession(session: Session): void {
-  const store = getHistoryStore();
-  if (!store[session.date]) {
-    store[session.date] = [];
-  }
-  store[session.date].push(session);
-}
-
-export function clearDay(date: string): void {
-  const store = getHistoryStore();
-  delete store[date];
-}
-
 function createSegment(
   game: Game,
-  startEpoch: number,
-  endEpoch: number,
-  settings: GameSettings,
+  startEpochMs: number,
+  endEpochMs: number,
+  activeElapsedSeconds: number,
+  gameSettings: GameSettings,
   playerCount?: 2 | 4,
   customPricePerMatch?: number | null
 ): GameSegment {
-  const elapsed = Math.floor((endEpoch - startEpoch) / 1000);
-  const matches = calcMatches(game, elapsed, settings);
-  const bill = calcBill(game, elapsed, settings, playerCount, customPricePerMatch);
+  const matches = calcMatches(game, activeElapsedSeconds, gameSettings);
+  const bill = calcBill(game, activeElapsedSeconds, gameSettings, playerCount, customPricePerMatch);
   
   return {
     gameId: game.id,
     gameLabel: game.label,
     gameEmoji: game.emoji,
-    startEpoch,
-    endEpoch,
-    elapsed,
+    startEpoch: startEpochMs,
+    endEpoch: endEpochMs,
+    elapsed: activeElapsedSeconds,
     matches,
     bill,
     playerCount,
   };
 }
 
-export function startStation(
+export async function startStation(
   id: number,
   game: Game,
   customerName: string,
   source: "manual" | "ps4",
   playerCount: 2 | 4 = 2
-): void {
-  const store = getStationStore();
-  const existing = store.get(id);
-  const now = Date.now();
+): Promise<void> {
+  const existing = await getStation(id);
+  const now = nowSeconds(); // seconds
   
   if (existing && existing.running && existing.segments.length > 0) {
-    // Close current segment and start new one
-    const settings = getSettings();
+    // Switch game within same session
+    const gameSettings = await getSettings();
     const currentGame = resolveGame(existing.gameId);
     
     if (currentGame && existing.currentSegmentStart) {
+      const { current: currentElapsed } = getElapsed(existing);
       const segment = createSegment(
         currentGame,
         existing.currentSegmentStart,
-        now,
-        settings,
+        now * 1000,
+        currentElapsed,
+        gameSettings,
         existing.playerCount
       );
       existing.segments.push(segment);
     }
     
-    // Start new segment with same session
-    existing.gameId = game.id;
-    existing.currentSegmentStart = now;
-    existing.paused = false;
-    existing.pausedAt = null;
-    existing.playerCount = playerCount;
-    store.set(id, existing);
+    await setStation(id, {
+      gameId: game.id,
+      currentGameJson: game,
+      currentSegmentStart: now * 1000, // store as ms for frontend consistency
+      paused: false,
+      pausedAt: null,
+      playerCount,
+      segments: existing.segments,
+    });
   } else {
-    // Fresh start - new session
-    store.set(id, {
+    // Fresh start
+    await setStation(id, {
       running: true,
       paused: false,
       pausedAt: null,
       totalPausedSeconds: 0,
       gameId: game.id,
-      sessionStartEpoch: now,
-      currentSegmentStart: now,
+      currentGameJson: game,
+      sessionStartEpoch: now * 1000,
+      currentSegmentStart: now * 1000,
       customerName: customerName || "",
       source,
       segments: [],
@@ -306,134 +478,137 @@ export function startStation(
   }
 }
 
-export function switchGame(
+export async function switchGame(
   id: number, 
   newGame: Game, 
   newPlayerCount?: 2 | 4,
   customPricePerMatch?: number | null
-): GameSegment | null {
-  const store = getStationStore();
-  const existing = store.get(id);
+): Promise<GameSegment | null> {
+  const existing = await getStation(id);
   
   if (!existing || !existing.running) {
     return null;
   }
 
-  // Guard against legacy state with undefined segments
   if (!existing.segments) existing.segments = [];
   
-  const settings = getSettings();
-  const now = Date.now();
+  const gameSettings = await getSettings();
+  const now = nowSeconds();
   
-  // Close current segment if exists
   const currentGame = resolveGame(existing.gameId);
   let closedSegment: GameSegment | null = null;
   
   if (currentGame && existing.currentSegmentStart) {
-    const adjustedNow = existing.paused && existing.pausedAt 
-      ? existing.pausedAt 
-      : now;
+    const endEpochMs = existing.paused && existing.pausedAt 
+      ? existing.pausedAt
+      : now * 1000;
+    
+    const { current: currentElapsed } = getElapsed(existing);
     
     closedSegment = createSegment(
       currentGame,
       existing.currentSegmentStart,
-      adjustedNow,
-      settings,
+      endEpochMs,
+      currentElapsed,
+      gameSettings,
       existing.playerCount,
-      customPricePerMatch
+      customPricePerMatch ?? existing.customPricePerMatch
     );
     existing.segments.push(closedSegment);
   }
   
-  // Start new segment immediately
-  existing.gameId = newGame.id;
-  existing.currentSegmentStart = now;
-  if (newPlayerCount) existing.playerCount = newPlayerCount;
+  const update: Partial<StationState> = {
+    gameId: newGame.id,
+    currentGameJson: newGame,
+    currentSegmentStart: now * 1000,
+    segments: existing.segments,
+  };
   
-  // If was paused, resume it
+  if (newPlayerCount) update.playerCount = newPlayerCount;
+  
+  // If was paused, resume automatically on switch
   if (existing.paused && existing.pausedAt) {
-    existing.totalPausedSeconds += now - existing.pausedAt;
-    existing.paused = false;
-    existing.pausedAt = null;
+    update.totalPausedSeconds = existing.totalPausedSeconds + (now - Math.floor(existing.pausedAt / 1000));
+    update.paused = false;
+    update.pausedAt = null;
   }
   
-  store.set(id, existing);
+  await setStation(id, update);
   return closedSegment;
 }
 
-export function pauseStation(id: number): number | null {
-  const store = getStationStore();
-  const existing = store.get(id);
+export async function pauseStation(id: number): Promise<number | null> {
+  const existing = await getStation(id);
   
   if (!existing || !existing.running || existing.paused) {
     return null;
   }
   
-  const now = Date.now();
-  existing.paused = true;
-  existing.pausedAt = now;
-  store.set(id, existing);
+  const now = nowSeconds();
+  await setStation(id, {
+    paused: true,
+    pausedAt: now * 1000,
+  });
   
-  return now;
+  return now * 1000;
 }
 
-export function resumeStation(id: number): number | null {
-  const store = getStationStore();
-  const existing = store.get(id);
+export async function resumeStation(id: number): Promise<number | null> {
+  const existing = await getStation(id);
   
   if (!existing || !existing.running || !existing.paused || !existing.pausedAt) {
     return null;
   }
   
-  const now = Date.now();
-  existing.totalPausedSeconds += now - existing.pausedAt;
-  existing.paused = false;
-  existing.pausedAt = null;
-  store.set(id, existing);
+  const now = nowSeconds();
+  const pausedAtSeconds = Math.floor(existing.pausedAt / 1000);
+  await setStation(id, {
+    totalPausedSeconds: existing.totalPausedSeconds + (now - pausedAtSeconds),
+    paused: false,
+    pausedAt: null,
+  });
   
-  return now;
+  return now * 1000;
 }
 
-export function stopStation(
+export async function stopStation(
   id: number,
   customPricePerMatch?: number | null
-): { session: Session; totalBill: number } | null {
-  const store = getStationStore();
-  const existing = store.get(id);
+): Promise<{ session: Session; totalBill: number } | null> {
+  const existing = await getStation(id);
   
   if (!existing || !existing.running) {
     return null;
   }
   
-  const settings = getSettings();
-  const now = Date.now();
+  const gameSettings = await getSettings();
+  const now = nowSeconds();
   
-  // Ensure segments is always an array (guard against legacy state with undefined segments)
   if (!existing.segments) existing.segments = [];
 
-  // Close current segment
   const currentGame = resolveGame(existing.gameId);
   if (currentGame && existing.currentSegmentStart) {
-    const adjustedNow = existing.paused && existing.pausedAt 
-      ? existing.pausedAt 
-      : now;
+    const endEpochMs = existing.paused && existing.pausedAt 
+      ? existing.pausedAt
+      : now * 1000;
+      
+    const { current: currentElapsed } = getElapsed(existing);
     
     const segment = createSegment(
       currentGame,
       existing.currentSegmentStart,
-      adjustedNow,
-      settings,
+      endEpochMs,
+      currentElapsed,
+      gameSettings,
       existing.playerCount,
-      customPricePerMatch
+      customPricePerMatch ?? existing.customPricePerMatch
     );
     existing.segments.push(segment);
   }
   
-  // Calculate totals
   const totalBill = existing.segments.reduce((sum, seg) => sum + (seg.bill ?? 0), 0);
   const totalElapsed = existing.segments.reduce((sum, seg) => sum + (seg.elapsed ?? 0), 0);
   
-  // Create session
   const sessionDate = new Date();
   const date = sessionDate.toISOString().split("T")[0];
   const time = sessionDate.toLocaleTimeString("en-US", { 
@@ -442,63 +617,70 @@ export function stopStation(
     hour12: false 
   });
   
+  // Round to 2 decimal places to avoid floating point issues
+  const roundedTotalBill = Math.round(totalBill * 100) / 100;
+  
   const session: Session = {
     date,
     time,
-    customerName: existing.customerName,
+    customerName: existing.customerName || "Customer",
     source: existing.source,
     totalElapsed,
-    totalBill,
+    totalBill: roundedTotalBill,
     segments: existing.segments,
     playerCount: existing.playerCount,
   };
   
-  // Save to history
-  saveSession(session);
+  await saveSession(session);
+  await resetStation(id);
   
-  // Reset station
-  resetStation(id);
-  
-  return { session, totalBill };
+  return { session, totalBill: roundedTotalBill };
 }
 
+// Calculate elapsed from stored epochs (server-side, recalculated on every poll)
 export function getElapsed(station: StationState): { current: number; total: number } {
-  // Guard against legacy state with undefined segments
   if (!station.segments) station.segments = [];
   
   if (!station.running || !station.currentSegmentStart) {
-    return { current: 0, total: station.segments.reduce((sum, seg) => sum + seg.elapsed, 0) };
+    return { 
+      current: 0, 
+      total: station.segments.reduce((sum, seg) => sum + (seg?.elapsed ?? 0), 0) 
+    };
   }
   
-  const now = Date.now();
+  const now = nowSeconds();
+  const segmentStartSeconds = Math.floor(station.currentSegmentStart / 1000);
   let currentElapsed: number;
   
   if (station.paused && station.pausedAt) {
-    currentElapsed = Math.floor((station.pausedAt - station.currentSegmentStart - station.totalPausedSeconds) / 1000);
+    const pausedAtSeconds = Math.floor(station.pausedAt / 1000);
+    currentElapsed = pausedAtSeconds - segmentStartSeconds - station.totalPausedSeconds;
   } else {
-    currentElapsed = Math.floor((now - station.currentSegmentStart - station.totalPausedSeconds) / 1000);
+    currentElapsed = now - segmentStartSeconds - station.totalPausedSeconds;
   }
   
-  const totalElapsed = station.segments.reduce((sum, seg) => sum + seg.elapsed, 0) + currentElapsed;
+  const segmentsElapsed = station.segments.reduce((sum, seg) => sum + (seg?.elapsed ?? 0), 0);
+  const totalElapsed = segmentsElapsed + currentElapsed;
   
-  return { current: Math.max(0, currentElapsed), total: Math.max(0, totalElapsed) };
+  return { 
+    current: Math.max(0, currentElapsed), 
+    total: Math.max(0, totalElapsed) 
+  };
 }
 
-export function stationStateToStation(id: number, state: StationState): Station {
+export async function stationStateToStation(id: number, state: StationState): Promise<Station> {
   const game = resolveGame(state.gameId);
   const { current, total } = getElapsed(state);
   
-  // Calculate current bill
-  const settings = getSettings();
+  const gameSettings = await getSettings();
   let currentBill = 0;
   let currentMatches = 0;
   if (game && state.running) {
-    currentBill = calcBill(game, current, settings, state.playerCount);
-    currentMatches = calcMatches(game, current, settings);
+    currentBill = calcBill(game, current, gameSettings, state.playerCount, state.customPricePerMatch);
+    currentMatches = calcMatches(game, current, gameSettings);
   }
   
-  // Calculate total bill from segments + current
-  const segmentsBill = state.segments.reduce((sum, seg) => sum + seg.bill, 0);
+  const segmentsBill = state.segments.reduce((sum, seg) => sum + (seg?.bill ?? 0), 0);
   const totalBill = segmentsBill + currentBill;
   
   return {
@@ -514,58 +696,40 @@ export function stationStateToStation(id: number, state: StationState): Station 
     totalElapsed: total,
     customerName: state.customerName,
     source: state.source,
-    segments: state.segments,
+    segments: state.segments ?? [],
     unknownGame: state.unknownGame,
     playerCount: state.playerCount,
+    customPricePerMatch: state.customPricePerMatch,
   };
 }
 
-export function getGameRegistry(): Map<string, CustomGame> {
-  if (!globalThis.__gameRegistry) {
-    globalThis.__gameRegistry = new Map();
-  }
-  return globalThis.__gameRegistry;
-}
-
-export function getGameByTitleId(titleId: string): CustomGame | null {
-  return getGameRegistry().get(titleId) || null;
-}
-
-export function saveCustomGame(game: CustomGame): void {
-  getGameRegistry().set(game.titleId, game);
-}
-
-export function getAllGames(): CustomGame[] {
-  return Array.from(getGameRegistry().values());
-}
-
-export function deleteGame(titleId: string): void {
-  getGameRegistry().delete(titleId);
-}
-
-export function setUnknownGame(id: number, titleId: string, titleName: string): void {
-  const store = getStationStore();
-  const existing = store.get(id);
-  const now = Date.now();
+export async function setUnknownGame(id: number, titleId: string, titleName: string): Promise<void> {
+  const existing = await getStation(id);
+  const now = nowSeconds();
   
   if (existing && existing.running) {
-    // If it's already running, it means we switched to an unknown game
-    existing.unknownGame = { titleId, titleName };
-    store.set(id, existing);
+    await setStation(id, {
+      unknownGame: { titleId, titleName },
+    });
   } else {
-    // Fresh start in unknown state
-    store.set(id, {
+    await setStation(id, {
       running: true,
       paused: false,
       pausedAt: null,
       totalPausedSeconds: 0,
       gameId: null,
-      sessionStartEpoch: now,
-      currentSegmentStart: now,
+      currentGameJson: null,
+      sessionStartEpoch: now * 1000,
+      currentSegmentStart: now * 1000,
       customerName: "",
       source: "ps4",
       segments: [],
       unknownGame: { titleId, titleName },
     });
   }
+}
+
+export async function getStationsCount(): Promise<number> {
+  const allStations = await getAllStations();
+  return allStations.length;
 }

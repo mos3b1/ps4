@@ -12,13 +12,27 @@ export async function OPTIONS() {
 }
 
 export async function POST(request: Request) {
+  console.log("[API] /api/station/start - Received request");
+  
   try {
-    const body = await request.json();
-    const { stationId, gameId, customerName, mode, playerCount, customPricePerMatch } = body;
-
-    if (typeof stationId !== "number" || stationId < 1 || stationId > 12 || !gameId) {
+    let body;
+    try {
+      body = await request.json();
+    } catch (e) {
       return NextResponse.json(
-        { error: "Missing stationId or gameId. stationId must be a number between 1 and 12" },
+        { error: "Invalid JSON body" },
+        { status: 400, headers: corsHeaders }
+      );
+    }
+    console.log("[API] Request body:", JSON.stringify(body, null, 2));
+    
+    // Validate body first
+    const { stationId, gameId, customerName, mode, playerCount, customPricePerMatch } = body;
+    
+    if (typeof stationId !== "number" || stationId < 1 || stationId > 12 || !gameId) {
+      console.log("[API] Validation failed - stationId:", stationId, "gameId:", gameId);
+      return NextResponse.json(
+        { error: "stationId required (1-12) and gameId required" },
         { status: 400, headers: corsHeaders }
       );
     }
@@ -44,41 +58,48 @@ export async function POST(request: Request) {
       );
     }
 
+    // Resolve game
     const game = resolveGame(gameId);
     if (!game) {
+      console.log("[API] Game not found for gameId:", gameId);
       return NextResponse.json(
         { error: "Game not found" },
         { status: 400, headers: corsHeaders }
       );
     }
+    console.log("[API] Resolved game:", game.label);
 
     const parsedPlayerCount = playerCount === 4 ? 4 : 2;
 
+    // Do the work
+    console.log("[API] Calling startStation...");
+    
     if (mode === "switch") {
-      // Assuming switchGame is defined elsewhere and imported
-      // For now, I'll just return a placeholder if switchGame is not available
-      // You'll need to import or define `switchGame` and `resolveGame`
-      // For the purpose of this edit, I'm assuming `GAMES.find` is `resolveGame`
-      // and `switchGame` is a function that takes these arguments.
-      const closedSegment = switchGame(stationId, game, parsedPlayerCount, customPricePerMatch);
+      const closedSegment = await switchGame(stationId, game, parsedPlayerCount, customPricePerMatch);
       return NextResponse.json(
         { success: true, closedSegment },
         { headers: corsHeaders }
       );
     }
 
-    // Default: new session
-    startStation(stationId, game, customerName || "", "manual", parsedPlayerCount);
+    const safeCustomerName = typeof customerName === 'string' ? customerName.trim() : "";
+    await startStation(stationId, game, safeCustomerName, "manual", parsedPlayerCount);
+    console.log("[API] startStation completed successfully");
 
     return NextResponse.json(
       { success: true },
       { headers: corsHeaders }
     );
+
   } catch (error) {
-    console.error("Start station error:", error);
+    console.error("[API ERROR] /api/station/start:", error);
+    console.error("[API ERROR] Stack:", error instanceof Error ? error.stack : "No stack");
+    
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    
     return NextResponse.json(
-      { error: "Invalid request" },
-      { status: 400, headers: corsHeaders }
+      { error: "Internal server error", details: errorMessage },
+      { status: 500, headers: corsHeaders }
     );
   }
 }

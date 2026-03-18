@@ -5,7 +5,6 @@ import { Station } from "@/lib/types";
 import { calcBill, calcMatches, calcCycleMinutes } from "@/lib/pricing";
 import { useTimer } from "@/context/TimerContext";
 import LiveTimer from "./LiveTimer";
-
 import SetupModal from "./SetupModal";
 
 interface StationCardProps {
@@ -24,34 +23,46 @@ export default function StationCard({ station, onStartClick }: StationCardProps)
   const [unknownRemember, setUnknownRemember] = useState(true);
   const [resolving, setResolving] = useState(false);
 
-  const isRunning = station.running;
-  const isPaused = station.paused;
-  const game = station.currentGame;
+  // Safe defaults with null checks
+  const isRunning = station?.running ?? false;
+  const isPaused = station?.paused ?? false;
+  const game = station?.currentGame ?? null;
+  const segments = station?.segments ?? [];
 
   const handleStop = () => {
+    if (!station?.id) return;
     stopStation(station.id);
   };
 
   const handleSwitchGame = (gameId: string, _customerName: string) => {
+    if (!station?.id) return;
     switchGame(station.id, gameId, 2);
     setShowSwitchModal(false);
   };
 
   const handlePause = () => {
+    if (!station?.id) return;
     pauseStation(station.id);
   };
 
   const handleResume = () => {
+    if (!station?.id) return;
     resumeStation(station.id);
   };
 
-  // Calculate current segment bill and matches
-  const currentBill = game ? calcBill(game, station.elapsed, settings, station.playerCount, station.customPricePerMatch ?? null) : 0;
-  const currentMatches = game ? calcMatches(game, station.elapsed, settings) : 0;
-  const cycleMinutes = game && game.mode === "time-match" ? calcCycleMinutes(game, settings) : 0;
+  // Calculate current segment bill and matches with null checks
+  const currentBill = game 
+    ? calcBill(game, station?.elapsed ?? 0, settings, station?.playerCount, station?.customPricePerMatch ?? null) 
+    : 0;
+  const currentMatches = game 
+    ? calcMatches(game, station?.elapsed ?? 0, settings) 
+    : 0;
+  const cycleMinutes = game && game.mode === "time-match" 
+    ? calcCycleMinutes(game, settings) 
+    : 0;
 
-  // Calculate total bill (segments + current)
-  const segmentsBill = (station.segments || []).reduce((sum, seg) => sum + seg.bill, 0);
+  // Calculate total bill (segments + current) with null checks
+  const segmentsBill = segments.reduce((sum, seg) => sum + (seg?.bill ?? 0), 0);
   const totalBill = segmentsBill + currentBill;
 
   // Format duration helper
@@ -89,7 +100,7 @@ export default function StationCard({ station, onStartClick }: StationCardProps)
               letterSpacing: "2px",
             }}
           >
-            PS4 #{station.id}
+            PS4 #{station?.id ?? "?"}
           </span>
           <span
             style={{
@@ -133,7 +144,7 @@ export default function StationCard({ station, onStartClick }: StationCardProps)
   }
 
   // ── UNKNOWN GAME STATE ────────────────────────────────────
-  if (isRunning && station.unknownGame) {
+  if (isRunning && station?.unknownGame) {
     const titleName = station.unknownGame.titleName;
 
     const handleResolve = async () => {
@@ -291,7 +302,7 @@ export default function StationCard({ station, onStartClick }: StationCardProps)
               letterSpacing: "2px",
             }}
           >
-            PS4 #{station.id}
+            PS4 #{station?.id ?? "?"}
           </span>
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
             <span
@@ -307,9 +318,9 @@ export default function StationCard({ station, onStartClick }: StationCardProps)
             </span>
             <span
               style={{
-                background: station.source === "ps4" ? "#f0c04015" : "#ffffff08",
-                border: station.source === "ps4" ? "1px solid #f0c04044" : "1px solid #333",
-                color: station.source === "ps4" ? "#f0c040" : "#555",
+                background: station?.source === "ps4" ? "#f0c04015" : "#ffffff08",
+                border: station?.source === "ps4" ? "1px solid #f0c04044" : "1px solid #333",
+                color: station?.source === "ps4" ? "#f0c040" : "#555",
                 fontSize: "10px",
                 padding: "2px 7px",
                 borderRadius: "3px",
@@ -317,7 +328,7 @@ export default function StationCard({ station, onStartClick }: StationCardProps)
                 fontWeight: 700,
               }}
             >
-              {station.source === "ps4" ? "AUTO" : "MANUAL"}
+              {station?.source === "ps4" ? "AUTO" : "MANUAL"}
             </span>
           </div>
         </div>
@@ -335,7 +346,7 @@ export default function StationCard({ station, onStartClick }: StationCardProps)
             >
               {game?.label || "Unknown"}
             </div>
-            {station.customerName && (
+            {station?.customerName && (
               <div style={{ fontSize: "12px", color: "#555", marginTop: "2px" }}>
                 👤 {station.customerName}
               </div>
@@ -346,7 +357,7 @@ export default function StationCard({ station, onStartClick }: StationCardProps)
         {/* Current segment info */}
         <div>
           <div style={{ textAlign: "center", marginBottom: "16px" }}>
-            <LiveTimer elapsedSeconds={station.elapsed} />
+            <LiveTimer elapsedSeconds={station?.elapsed ?? 0} />
           </div>
           
           {game?.mode === "time-match" && (
@@ -374,8 +385,8 @@ export default function StationCard({ station, onStartClick }: StationCardProps)
                   <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                     <input 
                       type="number"
-                      value={station.customPricePerMatch ?? (game.id === "pes" ? settings.pes.pricePerMatch : game.id === "fifa" ? settings.fifa.pricePerMatch : game.price)}
-                      onChange={(e) => setCustomPrice(station.id, parseInt(e.target.value) || 0)}
+                      value={station?.customPricePerMatch ?? (game.id === "pes" ? settings.pes.pricePerMatch : game.id === "fifa" ? settings.fifa.pricePerMatch : game.price)}
+                      onChange={(e) => setCustomPrice(station?.id ?? 0, parseInt(e.target.value) || 0)}
                       style={{ 
                         width: "60px", 
                         background: "#000", 
@@ -406,13 +417,13 @@ export default function StationCard({ station, onStartClick }: StationCardProps)
         </div>
 
         {/* Previous games */}
-        {station.segments && station.segments.length > 0 && (
+        {segments.length > 0 && (
           <div style={{ borderTop: "1px solid #1a1a2e", paddingTop: "12px" }}>
             <div style={{ fontSize: "11px", color: "#444", marginBottom: "8px", letterSpacing: "1px" }}>
               ── PREVIOUS GAMES ──
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              {(station.segments || []).map((segment, index) => (
+              {segments.map((segment, index) => (
                 <div
                   key={index}
                   style={{
@@ -423,11 +434,11 @@ export default function StationCard({ station, onStartClick }: StationCardProps)
                     color: "#888",
                   }}
                 >
-                  <span>{segment.gameEmoji}</span>
-                  <span style={{ flex: 1 }}>{segment.gameLabel}</span>
-                  <span>{formatDuration(segment.elapsed)}</span>
-                  {segment.matches > 0 && <span>{segment.matches} match</span>}
-                  <span style={{ color: "#f0c040" }}>{segment.bill}DZD</span>
+                  <span>{segment?.gameEmoji ?? "🎮"}</span>
+                  <span style={{ flex: 1 }}>{segment?.gameLabel ?? "Unknown"}</span>
+                  <span>{formatDuration(segment?.elapsed ?? 0)}</span>
+                  {segment?.matches > 0 && <span>{segment.matches} match</span>}
+                  <span style={{ color: "#f0c040" }}>{segment?.bill ?? 0}DZD</span>
                 </div>
               ))}
             </div>
@@ -563,9 +574,9 @@ export default function StationCard({ station, onStartClick }: StationCardProps)
       {/* Switch Game Modal */}
       {showSwitchModal && (
         <SetupModal
-          stationId={station.id}
+          stationId={station?.id ?? 0}
           mode="switch"
-          currentCustomerName={station.customerName}
+          currentCustomerName={station?.customerName ?? ""}
           onStart={handleSwitchGame}
           onClose={() => setShowSwitchModal(false)}
         />

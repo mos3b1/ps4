@@ -24,7 +24,6 @@ export async function POST(request: Request) {
       );
     }
 
-    // Validate mode
     if (mode !== "time-match" && mode !== "hour") {
       return NextResponse.json(
         { error: "Invalid mode. Must be 'time-match' or 'hour'" },
@@ -32,7 +31,6 @@ export async function POST(request: Request) {
       );
     }
 
-    // Validate matchCycleMinutes for time-match mode
     if (mode === "time-match" && (typeof matchCycleMinutes !== "number" || matchCycleMinutes <= 0)) {
       return NextResponse.json(
         { error: "matchCycleMinutes must be a positive number for time-match mode" },
@@ -40,7 +38,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const existing = getStation(stationId);
+    const existing = await getStation(stationId);
     if (!existing || !existing.unknownGame) {
       return NextResponse.json(
         { error: "Station is not in unknown game state" },
@@ -51,7 +49,6 @@ export async function POST(request: Request) {
     const titleId = existing.unknownGame.titleId;
     const titleName = existing.unknownGame.titleName;
 
-    // Save to registry (either permanent or temporary)
     const customGame: CustomGame = {
       titleId,
       titleName,
@@ -62,25 +59,22 @@ export async function POST(request: Request) {
       addedAt: new Date().toISOString(),
       isTemp: !remember,
     };
-    saveCustomGame(customGame);
+    await saveCustomGame(customGame);
 
-    // Create the Game object for pricing logic
     const resolvedGame: Game = {
       id: titleId,
       label: titleName,
-      emoji: "🎮", // default emoji for custom games
+      emoji: "🎮",
       mode: mode as GameMode,
       price,
       matchCycleMinutes: mode === "time-match" ? matchCycleMinutes : undefined,
     };
 
-    // Clear unknown state
-    existing.unknownGame = null;
-    setStation(stationId, existing);
+    await setStation(stationId, {
+      unknownGame: null,
+    });
 
-    // Call startStation which handles either fresh start or closing old segment
-    // It will set the gameId and start tracking billing properly.
-    startStation(stationId, resolvedGame, existing.customerName, existing.source);
+    await startStation(stationId, resolvedGame, existing.customerName, existing.source);
 
     return NextResponse.json(
       { success: true },

@@ -13,12 +13,22 @@ export async function OPTIONS() {
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
+    let body;
+    try {
+      body = await request.json();
+    } catch (e) {
+      return NextResponse.json(
+        { error: "Invalid JSON body" },
+        { status: 400, headers: corsHeaders }
+      );
+    }
+    
+    // Validate body first
     const { stationId, customPricePerMatch } = body;
-
+    
     if (typeof stationId !== "number" || stationId < 1 || stationId > 12) {
       return NextResponse.json(
-        { error: "Invalid stationId. Must be a number between 1 and 12" },
+        { error: "stationId required (1-12)" },
         { status: 400, headers: corsHeaders }
       );
     }
@@ -30,7 +40,8 @@ export async function POST(request: Request) {
       );
     }
 
-    const result = stopStation(stationId, customPricePerMatch);
+    // Do the work
+    const result = await stopStation(stationId, customPricePerMatch);
 
     if (!result) {
       return NextResponse.json(
@@ -44,20 +55,19 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         success: true,
-        // Primary fields
         totalBill,
         session,
-        // Aliases expected by test suite
         bill: totalBill,
         elapsed: session.totalElapsed,
       },
       { headers: corsHeaders }
     );
+
   } catch (error) {
-    console.error("Stop station error:", error);
+    console.error("[API ERROR] /api/station/stop:", error);
     return NextResponse.json(
-      { error: "Invalid request" },
-      { status: 400, headers: corsHeaders }
+      { error: "Internal server error", details: String(error) },
+      { status: 500, headers: corsHeaders }
     );
   }
 }

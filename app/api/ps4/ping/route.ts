@@ -14,12 +14,22 @@ export async function OPTIONS() {
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
+    let body;
+    try {
+      body = await request.json();
+    } catch (e) {
+      return NextResponse.json(
+        { error: "Invalid JSON body" },
+        { status: 400, headers: corsHeaders }
+      );
+    }
+    
+    // Validate body first
     const { stationId, event, titleId, titleName } = body;
-
+    
     if (typeof stationId !== "number" || stationId < 1 || stationId > 12 || !event) {
       return NextResponse.json(
-        { error: "Missing stationId or event. stationId must be a number between 1 and 12" },
+        { error: "stationId (1-12) and event required" },
         { status: 400, headers: corsHeaders }
       );
     }
@@ -31,23 +41,24 @@ export async function POST(request: Request) {
       );
     }
 
+    // Do the work
     if (event === "start") {
       let game = null;
       let gameId = titleId ? PS4_TITLE_MAP[titleId] : null;
 
-      // 1. Check GAMES list first
+      // 1. Check built-in games first
       if (gameId) {
         game = GAMES.find((g) => g.id === gameId);
       }
 
-      // 2 & 3. If not found -> check gameRegistry by titleId
+      // 2. Check custom registry by titleId
       if (!game && titleId) {
-        const customGame = getGameByTitleId(titleId);
+        const customGame = await getGameByTitleId(titleId);
         if (customGame) {
           game = {
             id: customGame.gameId,
             label: customGame.titleName,
-            emoji: "🎮", // fallback emoji for custom games
+            emoji: "🎮",
             mode: customGame.mode,
             price: customGame.price,
             matchCycleMinutes: customGame.matchCycleMinutes,
@@ -56,22 +67,27 @@ export async function POST(request: Request) {
         }
       }
 
-      const existingStation = getStation(stationId);
+      const existingStation = await getStation(stationId);
 
-      // 4. If NOT found anywhere -> mark station as unknown_game
+      // 3. Unknown game - needs owner resolution
       if (!game) {
         if (!titleId) {
           return NextResponse.json(
-            { error: "Missing titleId for unknown game" },
+            { error: "titleId required for unknown game" },
             { status: 400, headers: corsHeaders }
           );
         }
 
+        // Check if already running this unknown game
         if (existingStation?.unknownGame?.titleId === titleId) {
-           return NextResponse.json({ received: true, status: "unknown_game_already_running", titleName: titleName || titleId }, { headers: corsHeaders });
+           return NextResponse.json({ 
+             received: true, 
+             status: "unknown_game_already_running", 
+             titleName: titleName || titleId 
+           }, { headers: corsHeaders });
         }
 
-        setUnknownGame(stationId, titleId, titleName || titleId);
+        await setUnknownGame(stationId, titleId, titleName || titleId);
         
         return NextResponse.json(
           { received: true, status: "unknown_game", titleName: titleName || titleId },
@@ -79,10 +95,11 @@ export async function POST(request: Request) {
         );
       }
 
+      // 4. Known game - start or switch
       if (existingStation?.running) {
+        // If already has segments or different game, switch
         if ((existingStation.segments ?? []).length > 0 || existingStation.gameId !== gameId) {
-          // Already has segments running — switch game instead
-          const closedSegment = switchGame(stationId, game, undefined, undefined);
+          const closedSegment = await switchGame(stationId, game, undefined, undefined);
           return NextResponse.json(
             { received: true, stationId, event, switched: true, closedSegment },
             { headers: corsHeaders }
@@ -95,13 +112,13 @@ export async function POST(request: Request) {
         );
       }
 
-      // Fresh start with PS4 source (game found)
-      startStation(stationId, game, "", "ps4", 2);
+      // Fresh start with PS4 source
+      await startStation(stationId, game, "", "ps4", 2);
+      
     } else if (event === "stop") {
-      // Use stopStation to save session to history (previously resetStation was used — bug)
-      const existingStation = getStation(stationId);
+      const existingStation = await getStation(stationId);
       if (existingStation?.running) {
-        stopStation(stationId, undefined);
+        await stopStation(stationId, undefined);
       }
     }
 
@@ -109,11 +126,12 @@ export async function POST(request: Request) {
       { received: true, stationId, event },
       { headers: corsHeaders }
     );
+
   } catch (error) {
-    console.error("PS4 ping error:", error);
+    console.error("[API ERROR] /api/ps4/ping:", error);
     return NextResponse.json(
-      { error: "Invalid request" },
-      { status: 400, headers: corsHeaders }
+      { error: "Internal server error", details: String(error) },
+      { status: 500, headers: corsHeaders }
     );
   }
 }

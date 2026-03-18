@@ -13,20 +13,22 @@ export async function OPTIONS() {
 
 export async function GET() {
   try {
-    const stationStates = getAllStations();
-    const stations = stationStates.map((state, index) =>
-      stationStateToStation(index + 1, state)
+    // Do the work
+    const stationStates = await getAllStations();
+    const stations = await Promise.all(
+      stationStates.map((state, index) => stationStateToStation(index + 1, state))
     );
 
     return NextResponse.json(
       { stations },
       { headers: corsHeaders }
     );
+
   } catch (error) {
-    // Always return a valid shape — never 500 naked error
-    console.error("Station status error:", error);
+    console.error("[API ERROR] /api/station/status:", error);
+    // Always return valid shape even on error
     return NextResponse.json(
-      { stations: [] },
+      { stations: [], error: String(error) },
       { headers: corsHeaders }
     );
   }

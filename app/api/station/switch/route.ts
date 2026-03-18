@@ -15,16 +15,19 @@ export async function OPTIONS() {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
+    
+    // Validate body first
     const { stationId, gameId } = body;
-
+    
     if (typeof stationId !== "number" || stationId < 1 || stationId > 12 || !gameId) {
       return NextResponse.json(
-        { error: "Missing stationId or gameId. stationId must be a number between 1 and 12" },
+        { error: "stationId (1-12) and gameId required" },
         { status: 400, headers: corsHeaders }
       );
     }
 
-    const station = getStation(stationId);
+    // Do the work
+    const station = await getStation(stationId);
     if (!station || !station.running) {
       return NextResponse.json(
         { error: "Station not running" },
@@ -40,16 +43,18 @@ export async function POST(request: Request) {
       );
     }
 
-    const closedSegment = switchGame(stationId, newGame);
+    const closedSegment = await switchGame(stationId, newGame);
 
     return NextResponse.json(
       { success: true, closedSegment },
       { headers: corsHeaders }
     );
+
   } catch (error) {
+    console.error("[API ERROR] /api/station/switch:", error);
     return NextResponse.json(
-      { error: "Invalid request" },
-      { status: 400, headers: corsHeaders }
+      { error: "Internal server error", details: String(error) },
+      { status: 500, headers: corsHeaders }
     );
   }
 }

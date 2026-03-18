@@ -1,56 +1,91 @@
 import { NextResponse } from "next/server";
 import { getAllGames, saveCustomGame, deleteGame, CustomGame } from "@/lib/stationStore";
 
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
+
+export async function OPTIONS() {
+  return NextResponse.json({}, { headers: corsHeaders });
+}
+
 export async function GET() {
   try {
-    const games = getAllGames().filter(g => !g.isTemp);
-    return NextResponse.json({ games });
+    // Do the work
+    const games = (await getAllGames()).filter((g: CustomGame) => !g.isTemp);
+    return NextResponse.json({ games }, { headers: corsHeaders });
+
   } catch (error) {
-    console.error("GET games error:", error);
-    return NextResponse.json({ error: "Failed to get games" }, { status: 500 });
+    console.error("[API ERROR] /api/games GET:", error);
+    return NextResponse.json(
+      { error: "Internal server error", details: String(error) },
+      { status: 500, headers: corsHeaders }
+    );
   }
 }
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
+    
+    // Validate body first
     const { titleId, titleName, mode, price, matchCycleMinutes } = body;
-
+    
     if (!titleId || !mode || typeof price !== "number") {
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+      return NextResponse.json(
+        { error: "titleId, mode, and price required" },
+        { status: 400, headers: corsHeaders }
+      );
     }
 
+    // Do the work
     const game: CustomGame = {
       titleId,
       titleName: titleName || titleId,
-      gameId: "unknown", // Using 'unknown' to use generic Game structure or rely directly on price
+      gameId: "unknown",
       mode,
       price,
       matchCycleMinutes: mode === "time-match" ? matchCycleMinutes || 15 : undefined,
       addedAt: new Date().toISOString(),
     };
 
-    saveCustomGame(game);
-    return NextResponse.json({ success: true, game });
+    await saveCustomGame(game);
+    return NextResponse.json({ success: true, game }, { headers: corsHeaders });
+
   } catch (error) {
-    console.error("POST games error:", error);
-    return NextResponse.json({ error: "Failed to save game" }, { status: 500 });
+    console.error("[API ERROR] /api/games POST:", error);
+    return NextResponse.json(
+      { error: "Internal server error", details: String(error) },
+      { status: 500, headers: corsHeaders }
+    );
   }
 }
 
 export async function DELETE(request: Request) {
   try {
     const body = await request.json();
+    
+    // Validate body first
     const { titleId } = body;
-
+    
     if (!titleId) {
-      return NextResponse.json({ error: "Missing titleId" }, { status: 400 });
+      return NextResponse.json(
+        { error: "titleId required" },
+        { status: 400, headers: corsHeaders }
+      );
     }
 
-    deleteGame(titleId);
-    return NextResponse.json({ success: true });
+    // Do the work
+    await deleteGame(titleId);
+    return NextResponse.json({ success: true }, { headers: corsHeaders });
+
   } catch (error) {
-    console.error("DELETE games error:", error);
-    return NextResponse.json({ error: "Failed to delete game" }, { status: 500 });
+    console.error("[API ERROR] /api/games DELETE:", error);
+    return NextResponse.json(
+      { error: "Internal server error", details: String(error) },
+      { status: 500, headers: corsHeaders }
+    );
   }
 }
