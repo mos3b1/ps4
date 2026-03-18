@@ -1,4 +1,3 @@
-import type { Config } from "drizzle-kit";
 import { readFileSync } from "fs";
 
 // Read DATABASE_URL from .env.local file directly
@@ -20,6 +19,7 @@ if (!databaseUrl) {
   throw new Error("DATABASE_URL not found in environment or .env.local file");
 }
 
+/** @type {import("drizzle-kit").Config} */
 export default {
   schema: "./lib/db/schema.ts",
   out: "./drizzle",
@@ -27,4 +27,4 @@ export default {
   dbCredentials: {
     url: databaseUrl,
   },
-} satisfies Config;
+};
