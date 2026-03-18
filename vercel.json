@@ -1,0 +1,7 @@
+{
+  "buildCommand": "NEXT_TURBO=false next build",
+  "framework": "nextjs",
+  "env": {
+    "NEXT_TURBO": "false"
+  }
+}
